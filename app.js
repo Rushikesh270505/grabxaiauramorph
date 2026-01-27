@@ -360,3 +360,18 @@ micButton.addEventListener('click', () => {
         startVoiceMode();
     }
 });
+
+// Cinematic Welcome Sequence on Load
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        const welcomeText = "Welcome to the future of digital interaction. Experience the GRABX Aura Morph, where every particle is an extension of your imagination. Let’s build something extraordinary together. GRABX Quantum Core initialized. Systems are online and monitoring. I am your AI assistant, ready to transform your ideas into cinematic reality.";
+
+        // Trigger both Particle Morph and AI Voice
+        if (window.particleSystem) {
+            window.particleSystem.setStage('text', welcomeText);
+        }
+
+        // Optional: Speak the welcome
+        speak(welcomeText);
+    }, 1500); // 1.5s delay for premium transition
+});
