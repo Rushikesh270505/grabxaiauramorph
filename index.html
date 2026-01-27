@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRABX AI - Voice-Reactive AI Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;600&family=Inter:wght@400;700&display=swap"
+        rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', 'Inter', sans-serif;
+            background: #020617;
+            /* Navy Navy */
+            color: #fff;
+            overflow: hidden;
+        }
+
+        /* Branding Overlay */
+        .branding {
+            position: fixed;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .branding h1 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 6px;
+            color: #3b82f6;
+            /* Blue */
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .branding h2 {
+            font-size: 42px;
+            font-weight: 600;
+            color: #fff;
+            text-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Particle Canvas */
+        #particleCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            background: radial-gradient(circle at center, #0a0e2a 0%, #020617 100%);
+        }
+
+        /* Chat Overlay - Refined Glassmorphism */
+        .chat-wrapper {
+            position: fixed;
+            right: 40px;
+            bottom: 40px;
+            width: 440px;
+            height: 650px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            background: rgba(15, 23, 42, 0.7);
+            /* Deep Navy Translucent */
+            backdrop-filter: blur(30px);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 32px;
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.8), 0 0 20px rgba(59, 130, 246, 0.1);
+            transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+            overflow: hidden;
+        }
+
+        .chat-wrapper.minimized {
+            height: 70px;
+            transform: translateY(0);
+        }
+
+        .header {
+            padding: 20px 25px;
+            background: rgba(59, 130, 246, 0.05);
+            border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .header h1 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #3b82f6;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(59, 130, 246, 0.2) transparent;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 14px 20px;
+            border-radius: 18px;
+            font-size: 15px;
+            line-height: 1.6;
+            animation: fadeIn 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: #3b82f6;
+            /* GrabX Blue */
+            color: #fff;
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.2);
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.ai {
+            align-self: flex-start;
+            background: rgba(30, 41, 59, 0.5);
+            color: #e2e8f0;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .input-area {
+            padding: 25px;
+            background: rgba(15, 23, 42, 0.5);
+            border-top: 1px solid rgba(59, 130, 246, 0.1);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        #userInput {
+            flex: 1;
+            padding: 14px 20px;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 16px;
+            color: #fff;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        #userInput:focus {
+            background: rgba(30, 41, 59, 1);
+            border-color: #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.2);
+        }
+
+        #micButton {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #3b82f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 20px;
+        }
+
+        #micButton.recording {
+            background: #ef4444;
+            border-color: #ef4444;
+            color: #fff;
+            box-shadow: 0 0 25px rgba(239, 68, 68, 0.5);
+        }
+
+        #sendButton {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: #fff;
+            border: none;
+            border-radius: 16px;
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+            transition: all 0.3s;
+        }
+
+        #sendButton:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 30px rgba(37, 99, 235, 0.4);
+        }
+
+        .voice-status {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            text-align: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        .voice-status.active {
+            opacity: 1;
+        }
+
+        #transcription {
+            font-size: 56px;
+            font-weight: 600;
+            color: #fff;
+            text-shadow: 0 0 40px rgba(59, 130, 246, 0.6);
+            max-width: 900px;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="branding">
+        <h1>Aura Morph</h1>
+        <h2>GRABX AI</h2>
+    </div>
+
+    <canvas id="particleCanvas"></canvas>
+    <canvas id="hiddenCanvas" style="display: none;"></canvas>
+
+    <div class="voice-status" id="voiceStatus">
+        <div id="transcription"></div>
+    </div>
+
+    <div class="chat-wrapper" id="chatWrapper">
+        <div class="header" id="chatHeader">
+            <h1>Chat Assistant</h1>
+            <div id="toggleChat">−</div>
+        </div>
+
+        <div class="messages" id="messages">
+            <div class="message ai">
+                👋 GRABX AI is ready. Use voice or text to start coding in Python.
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div id="micButton">🎤</div>
+            <input type="text" id="userInput" placeholder="Type a message..." />
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script src="particles.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
