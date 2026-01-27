@@ -164,23 +164,9 @@ async function sendMessage() {
     userInput.value = '';
 
     // Fallback: Morph particles even for typed text for the "Wow" factor
+    // Fallback: Morph particles even for typed text for the "Wow" factor
     if (window.particleSystem && !isRecording) {
-        // Shift particle colors to a premium purple-blue for typed messages
-        this.originalColor = '#b4f0ff';
-        window.particleSystem.particles.forEach(p => p.color = '#c084fc');
-
         window.particleSystem.setStage('text', text);
-
-        // Calculate duration based on text length
-        const duration = Math.max(4000, text.length * 100);
-
-        setTimeout(() => {
-            if (!isRecording) {
-                window.particleSystem.setStage('sphere');
-                // Reset colors back to original GRABX palette
-                window.particleSystem.particles.forEach(p => p.color = p.initialColor);
-            }
-        }, duration);
     }
 
     // Call RushiAiAgent Backend (Assuming it's running on port 5001)
@@ -283,12 +269,8 @@ function stopVoiceMode() {
 
     // Transition to text morphing if we have spoken text
     if (spokenText.trim() && window.particleSystem) {
-        // Pass the FULL text, the particle system sequencer will now handle paging
+        // Pass the FULL text, the particle system sequencer will now handle everything
         window.particleSystem.setStage('text', spokenText.trim());
-
-        setTimeout(() => {
-            if (!isRecording) window.particleSystem.setStage('sphere');
-        }, 8000); // Longer timeout because sequencer needs time to flip pages
     } else if (window.particleSystem) {
         window.particleSystem.setStage('sphere');
     }
@@ -358,21 +340,10 @@ function speak(text) {
     utterance.pitch = 0.8; // Deep, synthetic feel
     utterance.volume = 1.0;
 
-    // Trigger "AI Morphing" - Neon Green shift
+    // Trigger "AI Morphing"
     if (window.particleSystem) {
-        window.particleSystem.particles.forEach(p => p.color = '#39ff14'); // Neon Green
-
         // Pass FULL text to use the new sequencer
         window.particleSystem.setStage('text', text);
-
-        utterance.onend = () => {
-            if (!isRecording) {
-                setTimeout(() => {
-                    window.particleSystem.setStage('sphere');
-                    window.particleSystem.particles.forEach(p => p.color = p.initialColor); // Reset to theme
-                }, 6000); // Increased to 6s dwell time as requested
-            }
-        };
     }
 
     window.speechSynthesis.speak(utterance);

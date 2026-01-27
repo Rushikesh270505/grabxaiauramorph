@@ -184,7 +184,14 @@ class ParticleSystem {
 
     setStage(stage, text = '') {
         this.currentStage = stage;
-        if (stage !== 'text') this.lastText = null;
+        const chat = document.getElementById('chatWrapper');
+
+        if (stage !== 'text') {
+            this.lastText = null;
+            if (chat) chat.classList.remove('hidden');
+        } else {
+            if (chat) chat.classList.add('hidden');
+        }
 
         const coreParticles = this.particles.filter(p => !p.isAmbient);
 
@@ -197,13 +204,14 @@ class ParticleSystem {
                 p.targetY = radius * Math.sin(theta) * Math.sin(phi);
                 p.targetZ = radius * Math.cos(phi);
                 p.ease = 0.05 + Math.random() * 0.05;
+                p.color = p.initialColor; // Reset colors
             });
         } else if (stage === 'text' && text) {
             // IGNORE status strings
             const blackList = ["Task completed", "Processing", "Thinking"];
             if (blackList.some(b => text.includes(b))) {
-                this.setStage('sphere');
-                return;
+                if (chat) chat.classList.remove('hidden');
+                return; // Silent ignore
             }
 
             this.lastText = null; // Reset cache to force render
@@ -227,33 +235,35 @@ class ParticleSystem {
             this.textSequenceInterval = null;
         }
 
-        // Live transcription stays un-chunked for speed
+        // Apply "Venom" logic to ALL text immediately
         if (isLive) {
             this.renderMorph(text);
-            return;
+        } else {
+            this.sequenceText(text);
         }
-
-        this.sequenceText(text);
     }
 
     sequenceText(text) {
         hCtx.font = `bold ${Math.floor(canvas.width / 12)}px Outfit, Arial, sans-serif`;
         const words = text.split(' ');
         const chunks = [];
-        let currentLine = words[0];
+        let currentChunk = "";
 
-        // Group words into single lines based on width
-        for (let i = 1; i < words.length; i++) {
-            const word = words[i];
-            const width = hCtx.measureText(currentLine + " " + word).width;
-            if (width < canvas.width * 0.9) {
-                currentLine += " " + word;
+        // Safe width for chunks (a bit less than screen to avoid edge clipping)
+        const maxChunkWidth = canvas.width * 0.8;
+
+        words.forEach(word => {
+            const testLine = currentChunk ? currentChunk + " " + word : word;
+            const metrics = hCtx.measureText(testLine);
+
+            if (metrics.width < maxChunkWidth) {
+                currentChunk = testLine;
             } else {
-                chunks.push(currentLine);
-                currentLine = word;
+                if (currentChunk) chunks.push(currentChunk);
+                currentChunk = word;
             }
-        }
-        chunks.push(currentLine);
+        });
+        if (currentChunk) chunks.push(currentChunk);
 
         let currentChunkIndex = 0;
         const displayChunk = () => {
@@ -282,13 +292,13 @@ class ParticleSystem {
 
         displayChunk();
         if (chunks.length > 1) {
-            this.textSequenceInterval = setInterval(displayChunk, 3000);
+            this.textSequenceInterval = setInterval(displayChunk, 5000); // 5s per chunk for relaxed reading
         }
     }
 
     renderMorph(text) {
-        if (text === this.lastText) return;
-        this.lastText = text;
+        if (!text) return;
+        this.lastText = text; // Track but don't block, to allow physics refreshes
 
         hCtx.clearRect(0, 0, hiddenCanvas.width, hiddenCanvas.height);
         hCtx.fillStyle = 'white';
@@ -357,39 +367,32 @@ class ParticleSystem {
             return;
         }
 
-        // Fix Vertical Trimming: Shuffle or uniformly sample pixels
-        // This ensures particles cover the WHOLE word, not just the top half
-        const shuffleArray = (array) => {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
-            }
-        };
-        shuffleArray(textPixels);
+        // ULTRA-FAST DETERMINISTIC SAMPLING (No Shuffle Lag)
+        const numCore = this.coreParticles.length;
+        const textTargetCount = Math.floor(numCore * 0.85);
+        const pixelStep = textPixels.length / textTargetCount;
 
-        const coreParticles = this.particles.filter(p => !p.isAmbient);
-
-        // Use about 80% of particles for the text to keep it DENSE like the Venom demo
-        const textTargetCount = Math.floor(coreParticles.length * 0.85);
-
-        coreParticles.forEach((p, i) => {
+        this.coreParticles.forEach((p, i) => {
             if (i < textTargetCount) {
-                // Map to a random pixel from the shuffled set (repeating if needed for density)
-                const px = textPixels[i % textPixels.length];
-                p.targetX = px.x + (Math.random() - 0.5) * 3;
-                p.targetY = px.y + (Math.random() - 0.5) * 3;
-                p.targetZ = (Math.random() - 0.5) * 10;
-                p.ease = 0.08 + Math.random() * 0.05;
+                // High-speed index mapping
+                const pixelIndex = Math.floor((i * pixelStep) % textPixels.length);
+                const px = textPixels[pixelIndex];
+
+                p.targetX = px.x + (Math.random() - 0.5) * 2;
+                p.targetY = px.y + (Math.random() - 0.5) * 2;
+                // STABLE DISTANCE: Push back +250 (Deep into screen)
+                p.targetZ = 250 + (Math.random() - 0.5) * 30;
+                p.ease = 0.12 + Math.random() * 0.05; // Snappier for distance
             } else {
-                // PARTICLE IS SCATTERED (HALO EFFECT) - More cinematic scatter
+                // CINEMATIC HALO (Scattered Drifters)
                 const angle1 = Math.random() * Math.PI * 2;
                 const angle2 = Math.random() * Math.PI * 2;
-                const dist = 250 + Math.random() * 350;
+                const dist = 350 + Math.random() * 200;
 
                 p.targetX = Math.cos(angle1) * Math.sin(angle2) * dist;
                 p.targetY = Math.sin(angle1) * Math.sin(angle2) * dist;
-                p.targetZ = Math.cos(angle2) * dist - 200; // Push some back for depth
-                p.ease = 0.01 + Math.random() * 0.02;
+                p.targetZ = 300 + Math.cos(angle2) * dist; // Drifts behind the text
+                p.ease = 0.02 + Math.random() * 0.04;
             }
         });
     }
@@ -407,8 +410,8 @@ class ParticleSystem {
             const time = Date.now() * 0.001;
 
             // Influence rotation speed and direction by mouse position
-            let rotX = 0.005;
-            let rotY = 0.005;
+            let rotX = 0.003; // Slightly faster than half for smoothness
+            let rotY = 0.003;
 
             if (this.mouse.x !== null && this.mouse.y !== null) {
                 rotY = (this.mouse.x / canvas.width) * 0.05;
@@ -427,31 +430,35 @@ class ParticleSystem {
             const radius = 200 + this.audioData.volume * 200;
 
             this.coreParticles.forEach(p => {
-                // Multi-axis rotation
+                // ROTATE THE TARGETS (This allows the particles to PULL back to sphere)
+                let tx = p.targetX;
+                let ty = p.targetY;
+                let tz = p.targetZ;
+
                 // Rotate around Y
-                let x = p.targetX;
-                let z = p.targetZ;
-                p.targetX = x * cosY - z * sinY;
-                p.targetZ = x * sinY + z * cosY;
+                let ntx = tx * cosY - tz * sinY;
+                let ntz = tz * cosY + tx * sinY;
+                tx = ntx;
+                tz = ntz;
 
                 // Rotate around X
-                let y = p.targetY;
-                z = p.targetZ;
-                p.targetY = y * cosX - z * sinX;
-                p.targetZ = y * sinX + z * cosX;
+                let nty = ty * cosX - tz * sinX;
+                ntz = tz * cosX + ty * sinX;
+                ty = nty;
+                tz = ntz;
 
-                // REDUCED SURFACE JITTER
-                const jitter = 0.003;
-                p.targetX += (Math.random() - 0.5) * radius * jitter;
-                p.targetY += (Math.random() - 0.5) * radius * jitter;
-                p.targetZ += (Math.random() - 0.5) * radius * jitter;
+                // Update targets
+                p.targetX = tx;
+                p.targetY = ty;
+                p.targetZ = tz;
 
-                // Keep sphere shape
-                const mag = Math.sqrt(p.targetX ** 2 + p.targetY ** 2 + p.targetZ ** 2);
-                if (mag > 0) {
-                    p.targetX = (p.targetX / mag) * radius;
-                    p.targetY = (p.targetY / mag) * radius;
-                    p.targetZ = (p.targetZ / mag) * radius;
+                // FORCE RECENTER: If particles are far (stuck in text depth), pull them to sphere radius
+                const mag = Math.sqrt(tx * tx + ty * ty + tz * tz);
+                if (mag > radius * 1.5 || mag < radius * 0.5) {
+                    const scale = radius / mag;
+                    p.targetX *= scale;
+                    p.targetY *= scale;
+                    p.targetZ *= scale;
                 }
             });
         }
