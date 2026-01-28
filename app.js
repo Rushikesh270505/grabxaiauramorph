@@ -1,3 +1,4 @@
+
 // Core Application Logic for GRABX AI
 
 const messagesContainer = document.getElementById('messages');
@@ -313,40 +314,79 @@ document.getElementById('chatHeader').addEventListener('click', () => {
 let voices = [];
 function loadVoices() {
     voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+        console.log(`Loaded ${voices.length} voices.`);
+    }
 }
 window.speechSynthesis.onvoiceschanged = loadVoices;
 loadVoices();
 
-function speak(text) {
+// Warm up the speech engine (crucial for some browsers/OS)
+function warmUpAudio() {
+    window.speechSynthesis.cancel();
+    const warmUp = new SpeechSynthesisUtterance("");
+    warmUp.volume = 0;
+    window.speechSynthesis.speak(warmUp);
+    console.log("Audio engine warmed up.");
+}
+
+function speak(text, isWelcome = false) {
     if (!text) return;
+
+    // Safety check for browser support
+    if (!window.speechSynthesis) {
+        console.error("Speech Synthesis not supported in this browser.");
+        return;
+    }
+
     window.speechSynthesis.cancel();
 
-    // Fallback: If voices not loaded yet, try loading again
     if (voices.length === 0) loadVoices();
 
     const utterance = new SpeechSynthesisUtterance(text);
 
-    // Try to find a premium robotic/deep male voice
-    const preferredVoice = voices.find(v =>
-        v.name.includes('Google US English Male') ||
-        v.name.includes('Daniel') ||
-        v.name.includes('Guy') ||
-        v.name.includes('Microsoft David')
-    );
+    // VOICE SELECTION LOGIC
+    let selectedVoice = null;
 
-    if (preferredVoice) utterance.voice = preferredVoice;
+    if (isWelcome) {
+        // Targeted Robotic/Male voices
+        selectedVoice = voices.find(v =>
+            v.name.includes('Google US English Male') ||
+            v.name.includes('Microsoft David') ||
+            v.name.includes('Daniel') ||
+            v.name.includes('Alex') || // Common on Mac
+            v.name.includes('Male')
+        );
 
-    utterance.rate = 1.0;
-    utterance.pitch = 0.8; // Deep, synthetic feel
+        utterance.rate = 0.75; // Even slower for heavy, cinematic sync
+        utterance.pitch = 0.85;
+    } else {
+        selectedVoice = voices.find(v =>
+            v.name.includes('Google') ||
+            v.name.includes('Female') ||
+            v.name.includes('Samantha')
+        );
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+    }
+
+    // Default to first available voice if preferred isn't found
+    if (selectedVoice) {
+        utterance.voice = selectedVoice;
+    } else if (voices.length > 0) {
+        utterance.voice = voices[0];
+    }
+
     utterance.volume = 1.0;
 
-    // Trigger "AI Morphing"
-    if (window.particleSystem) {
-        // Pass FULL text to use the new sequencer
+    // Trigger Particle Morphing if short text AND not in welcome cinematic
+    if (window.particleSystem && text.length < 100 && !isWelcome) {
         window.particleSystem.setStage('text', text);
     }
 
+    console.log(`Speaking: "${text.substring(0, 30)}..." using ${utterance.voice ? utterance.voice.name : 'default'}`);
     window.speechSynthesis.speak(utterance);
+    return utterance;
 }
 
 // Event Listeners
@@ -361,17 +401,88 @@ micButton.addEventListener('click', () => {
     }
 });
 
-// Cinematic Welcome Sequence on Load
-window.addEventListener('load', () => {
-    setTimeout(() => {
-        const welcomeText = "Welcome to the future of digital interaction. Experience the GRABX Aura Morph, where every particle is an extension of your imagination. Let’s build something extraordinary together. GRABX Quantum Core initialized. Systems are online and monitoring. I am your AI assistant, ready to transform your ideas into cinematic reality.";
+// Cinematic Welcome Sequence - Robust Sequential Flow
+async function startCinematicSequence() {
+    console.log("Starting Cinematic Sequence...");
+    const overlay = document.getElementById('initOverlay');
+    if (overlay) overlay.classList.add('fade-out');
 
-        // Trigger both Particle Morph and AI Voice
+    warmUpAudio();
+    loadVoices();
+
+    const welcomeSegments = [
+        "Welcome, to the future,",
+        "of digital interaction.",
+        "Experience, the GRAB X Aura Morph,",
+        "where every particle, is ",
+        "an extension of your imagination.",
+        "Let’s build, something extraordinary, together.",
+        "GRAB X Quantum Core, initialized.",
+        "Systems are online, and monitoring.",
+        "I am your AI assistant,",
+        "ready to transform your ideas,",
+        "into cinematic reality."
+    ];
+
+    if (window.particleSystem) {
+        console.log("Setting initial TEXT stage for sequence...");
+        window.particleSystem.setStage('text', '');
+    }
+
+    for (let i = 0; i < welcomeSegments.length; i++) {
+        const segment = welcomeSegments[i];
+        console.log(`Processing Segment ${i + 1}/11: ${segment}`);
+
         if (window.particleSystem) {
-            window.particleSystem.setStage('text', welcomeText);
+            // Render text without commas for cleaner visuals
+            window.particleSystem.renderMorph(segment.replace(/,/g, ''));
         }
 
-        // Optional: Speak the welcome
-        speak(welcomeText);
-    }, 1500); // 1.5s delay for premium transition
+        // Promise wrapper for reliable sequential speech
+        await new Promise((resolve) => {
+            const utterance = speak(segment, true);
+            if (!utterance) {
+                console.warn("Utterance failed to create for segment:", segment);
+                resolve();
+                return;
+            }
+
+            let resolved = false;
+            const complete = () => {
+                if (!resolved) {
+                    resolved = true;
+                    // Cinematic "breath" pause (300ms) between sentences
+                    setTimeout(resolve, 300);
+                }
+            };
+
+            utterance.onend = complete;
+            utterance.onerror = complete;
+
+            // Failsafe: Wait at most 8s per segment
+            setTimeout(complete, 8000);
+        });
+    }
+
+    console.log("Greeting Sequence Complete. Transitioning back to SPHERE...");
+    setTimeout(() => {
+        if (window.particleSystem) {
+            console.log("FINAL TRANSITION: Stage -> SPHERE");
+            if (window.particleSystem.textSequenceInterval) {
+                clearInterval(window.particleSystem.textSequenceInterval);
+                window.particleSystem.textSequenceInterval = null;
+            }
+            window.particleSystem.setStage('sphere');
+        } else {
+            console.error("ERROR: window.particleSystem lost during sequence!");
+        }
+    }, 2000);
+}
+
+// User Initialization Trigger
+document.getElementById('initBtn').addEventListener('click', startCinematicSequence);
+
+window.addEventListener('load', () => {
+    // Just ensure voices are ready for the button
+    loadVoices();
 });
