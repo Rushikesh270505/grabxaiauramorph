@@ -5,6 +5,7 @@ const messagesContainer = document.getElementById('messages');
 const userInput = document.getElementById('userInput');
 const sendButton = document.getElementById('sendButton');
 const micButton = document.getElementById('micButton');
+const subtitleButton = document.getElementById('subtitleButton');
 const voiceStatus = document.getElementById('voiceStatus');
 const transcriptionDiv = document.getElementById('transcription');
 
@@ -14,6 +15,9 @@ let audioContext;
 let analyzer;
 let dataArray;
 let source;
+let isLiveTranslationMode = false;
+let translationRecognition = null;
+let introSkipped = false;
 
 // 1. Initialize Speech Recognition
 if ('webkitSpeechRecognition' in window) {
@@ -39,7 +43,7 @@ if ('webkitSpeechRecognition' in window) {
                 // LIVE MORPH: Update particles in real-time with everything heard
                 const statusWords = ["Listening...", "Initializing Voice...", "Initializing...", "STT Network Lag"];
                 if (window.particleSystem && interimTranscription.trim().length > 0 && !statusWords.some(s => interimTranscription.includes(s))) {
-                    window.particleSystem.setStage('text', interimTranscription.trim());
+                    window.particleSystem.setStage('text', interimTranscription.trim(), true);
                 }
             }
         }
@@ -161,10 +165,12 @@ async function sendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
 
+    // Check for live translation command - REMOVED (Replaced by UI Button)
+    // if (text.toLowerCase() === 'live translation') ...
+
     addMessage(text, 'user');
     userInput.value = '';
 
-    // Fallback: Morph particles even for typed text for the "Wow" factor
     // Fallback: Morph particles even for typed text for the "Wow" factor
     if (window.particleSystem && !isRecording) {
         window.particleSystem.setStage('text', text);
@@ -393,19 +399,171 @@ function speak(text, isWelcome = false) {
 sendButton.addEventListener('click', sendMessage);
 userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-micButton.addEventListener('click', () => {
-    if (isRecording) {
+// Duplicate listener removed (handled by unified micButton.onclick below)
+
+// Live Subtitles / Auditorium Mode
+function startLiveTranslation() {
+    if (!recognition) {
+        addMessage('❌ Speech recognition not supported in this browser.', 'ai');
+        return;
+    }
+
+    addMessage('🎙️ Auditorium Mode Activated. Your voice will appear as instant English subtitles.', 'ai');
+    isLiveTranslationMode = true;
+
+    // Create specific instance for Auditorium Mode
+    translationRecognition = new webkitSpeechRecognition();
+    translationRecognition.continuous = true;
+    let lastParticleUpdate = 0;
+    const PARTICLE_THROTTLE_MS = 100; // Only update particles every 100ms
+
+    translationRecognition.interimResults = true;
+    translationRecognition.lang = 'en-US'; // Locked to English as requested
+    translationRecognition.maxAlternatives = 1;
+
+    let silenceTimer = null;
+
+    translationRecognition.onresult = (event) => {
+        let interimText = '';
+        let finalText = ''; // We track this to know when a sentence ends
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+                finalText = transcript;
+            } else {
+                interimText += transcript;
+            }
+        }
+
+        // SUBTITLE LOGIC:
+        // We want to show the currently spoken phrase.
+        // If we have interim text, that's the priority (live speech).
+        // If we only has final text, show that (end of sentence).
+
+        const displayText = interimText || finalText;
+
+        if (displayText.trim()) {
+            // UI text updates instantly (cheap)
+            transcriptionDiv.textContent = displayText;
+
+            // Particle updates are heavy, so we throttle them
+            const now = Date.now();
+            if (now - lastParticleUpdate > PARTICLE_THROTTLE_MS || finalText) { // Always update on final
+                if (window.particleSystem) {
+                    let visualText = displayText.trim();
+                    if (visualText.length > 50) {
+                        visualText = "..." + visualText.slice(-47);
+                    }
+                    window.particleSystem.setStage('text', visualText, true);
+                    lastParticleUpdate = now;
+                }
+            }
+
+            // Reset silence timer
+            clearTimeout(silenceTimer);
+            silenceTimer = setTimeout(() => {
+                // Keep text
+            }, 3000);
+        }
+    };
+
+    translationRecognition.onerror = (event) => {
+        console.log('Subtitle error:', event.error);
+        // Ignore no-speech errors in continuous mode
+    };
+
+    // Safe restart loop for continuous listening
+    translationRecognition.onend = () => {
+        if (isLiveTranslationMode) {
+            setTimeout(() => {
+                if (isLiveTranslationMode && translationRecognition) {
+                    try {
+                        translationRecognition.start();
+                    } catch (e) {
+                        console.log('Subtitle restart skipped:', e);
+                    }
+                }
+            }, 500);
+        }
+    };
+
+    try {
+        translationRecognition.start();
+        subtitleButton.classList.add('recording');
+        voiceStatus.classList.add('active');
+        transcriptionDiv.textContent = '🎤 Ready for speech...';
+        transcriptionDiv.style.color = '#00d4ff'; // Cyan for cool factor
+
+        addMessage('👋 Click the Subtitles button again to stop Auditorium Mode.', 'ai');
+    } catch (e) {
+        console.error('Could not start subtiltes:', e);
+        addMessage('❌ Error starting Auditorium Mode.', 'ai');
+        isLiveTranslationMode = false;
+    }
+}
+
+function stopLiveTranslation() {
+    isLiveTranslationMode = false;
+    if (translationRecognition) {
+        try {
+            translationRecognition.stop();
+        } catch (e) { }
+        translationRecognition = null;
+    }
+
+    subtitleButton.classList.remove('recording');
+    voiceStatus.classList.remove('active');
+    transcriptionDiv.textContent = '';
+
+    if (window.particleSystem) {
+        window.particleSystem.setStage('sphere');
+    }
+    addMessage('🛑 Auditorium Mode stopped.', 'ai');
+}
+
+// 1. Mic Button Handler (Standard Voice Mode)
+micButton.onclick = () => {
+    if (isLiveTranslationMode) {
+        stopLiveTranslation(); // Stop other mode first
+        startVoiceMode();
+    } else if (isRecording) {
         stopVoiceMode();
     } else {
         startVoiceMode();
     }
-});
+};
 
-// Cinematic Welcome Sequence - Robust Sequential Flow
+// 2. Subtitle Button Handler (Auditorium Mode)
+subtitleButton.onclick = () => {
+    if (isRecording) {
+        stopVoiceMode(); // Stop other mode first
+        startLiveTranslation();
+    } else if (isLiveTranslationMode) {
+        stopLiveTranslation();
+    } else {
+        startLiveTranslation();
+    }
+};
+
+// Cinematic Welcome Sequence with Skip Intro
+let sequenceAborted = false;
+
 async function startCinematicSequence() {
     console.log("Starting Cinematic Sequence...");
     const overlay = document.getElementById('initOverlay');
+    const skipBtn = document.getElementById('skipIntroBtn');
+
     if (overlay) overlay.classList.add('fade-out');
+    sequenceAborted = false;
+    introSkipped = false;
+
+    // Show skip button
+    setTimeout(() => {
+        if (skipBtn && !introSkipped) {
+            skipBtn.classList.add('visible');
+        }
+    }, 1000);
 
     warmUpAudio();
     loadVoices();
@@ -416,7 +574,7 @@ async function startCinematicSequence() {
         "Experience, the GRAB X Aura Morph,",
         "where every particle, is ",
         "an extension of your imagination.",
-        "Let’s build, something extraordinary, together.",
+        "Let's build, something extraordinary, together.",
         "GRAB X Quantum Core, initialized.",
         "Systems are online, and monitoring.",
         "I am your AI assistant,",
@@ -424,34 +582,66 @@ async function startCinematicSequence() {
         "into cinematic reality."
     ];
 
+    // Hide Chat Interface during sequence
+    const chatWrapper = document.getElementById('chatWrapper');
+    if (chatWrapper) {
+        chatWrapper.style.opacity = '0';
+        chatWrapper.style.pointerEvents = 'none';
+        chatWrapper.style.transition = 'opacity 1s ease';
+    }
+
     if (window.particleSystem) {
         console.log("Setting initial TEXT stage for sequence...");
         window.particleSystem.setStage('text', '');
     }
 
     for (let i = 0; i < welcomeSegments.length; i++) {
+        if (sequenceAborted) {
+            console.log('Sequence aborted by user');
+            break;
+        }
+
         const segment = welcomeSegments[i];
         console.log(`Processing Segment ${i + 1}/11: ${segment}`);
 
         if (window.particleSystem) {
-            // Render text without commas for cleaner visuals
             window.particleSystem.renderMorph(segment.replace(/,/g, ''));
         }
 
-        // Promise wrapper for reliable sequential speech
         await new Promise((resolve) => {
-            const utterance = speak(segment, true);
-            if (!utterance) {
-                console.warn("Utterance failed to create for segment:", segment);
+            if (sequenceAborted) {
                 resolve();
                 return;
             }
+
+            const utterance = new SpeechSynthesisUtterance(segment);
+            const voices = window.speechSynthesis.getVoices();
+
+            // Prioritize "Robotic" voices: Fred (Mac), then Google US
+            let selectedVoice = voices.find(v => v.name === 'Fred')
+                || voices.find(v => v.name.includes('Google US English'))
+                || voices.find(v => v.name.includes('Samantha'))
+                || voices.find(v => v.lang.startsWith('en'))
+                || voices[0];
+
+            if (selectedVoice) {
+                utterance.voice = selectedVoice;
+                if (selectedVoice.name === 'Fred') {
+                    // Maximum Robot Vibe
+                    utterance.pitch = 0.7;
+                    utterance.rate = 0.85;
+                } else {
+                    // Force Robotic Effect
+                    utterance.pitch = 0.55;
+                    utterance.rate = 0.85;
+                }
+            }
+            utterance.volume = 1.0;
 
             let resolved = false;
             const complete = () => {
                 if (!resolved) {
                     resolved = true;
-                    // Cinematic "breath" pause (300ms) between sentences
                     setTimeout(resolve, 300);
                 }
             };
@@ -459,12 +649,26 @@ async function startCinematicSequence() {
             utterance.onend = complete;
             utterance.onerror = complete;
 
-            // Failsafe: Wait at most 8s per segment
+            window.speechSynthesis.speak(utterance);
+
+            // Failsafe timeout
             setTimeout(complete, 8000);
         });
     }
 
+    // Hide skip button
+    if (skipBtn) {
+        skipBtn.classList.remove('visible');
+    }
+
     console.log("Greeting Sequence Complete. Transitioning back to SPHERE...");
+
+    // Show Chat Interface
+    if (chatWrapper) {
+        chatWrapper.style.opacity = '1';
+        chatWrapper.style.pointerEvents = 'all';
+    }
+
     setTimeout(() => {
         if (window.particleSystem) {
             console.log("FINAL TRANSITION: Stage -> SPHERE");
@@ -478,6 +682,46 @@ async function startCinematicSequence() {
         }
     }, 2000);
 }
+
+// Skip Intro functionality
+function skipIntro() {
+    console.log('Skip intro clicked');
+    sequenceAborted = true;
+    introSkipped = true;
+
+    // Stop any ongoing speech
+    window.speechSynthesis.cancel();
+
+    // Hide skip button
+    const skipBtn = document.getElementById('skipIntroBtn');
+    if (skipBtn) {
+        skipBtn.classList.remove('visible');
+    }
+
+    // Hide Overlay Immediately
+    const overlay = document.getElementById('initOverlay');
+    if (overlay) overlay.style.display = 'none';
+
+    // Show Chat Interface Immediately
+    const chatWrapper = document.getElementById('chatWrapper');
+    if (chatWrapper) {
+        chatWrapper.style.opacity = '1';
+        chatWrapper.style.pointerEvents = 'all';
+    }
+
+    // Immediately go to sphere
+    if (window.particleSystem) {
+        window.particleSystem.setStage('sphere');
+    }
+}
+
+// Add skip intro button listener
+document.addEventListener('DOMContentLoaded', () => {
+    const skipBtn = document.getElementById('skipIntroBtn');
+    if (skipBtn) {
+        skipBtn.addEventListener('click', skipIntro);
+    }
+})
 
 // User Initialization Trigger
 document.getElementById('initBtn').addEventListener('click', startCinematicSequence);

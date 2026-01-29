@@ -17,7 +17,6 @@ class Particle {
         this.targetY = y;
         this.targetZ = z;
 
-        // REFERENCE COORDINATES for non-destructive rotation
         this.sphereX = 0;
         this.sphereY = 0;
         this.sphereZ = 0;
@@ -72,7 +71,6 @@ class Particle {
             const dy = this.targetY - this.y;
             const dz = this.targetZ - this.z;
 
-            // Boost pull during transitions for a "snap-to-sphere" effect
             const basePull = (stage === 'sphere') ? 0.08 : 0.05;
             const pull = basePull + (transitionProgress * 0.2);
 
@@ -85,7 +83,7 @@ class Particle {
             const mdx = this.x - relMouseX;
             const mdy = this.y - relMouseY;
             const dist = Math.sqrt(mdx * mdx + mdy * mdy);
-            const forceRange = 150;
+            const forceRange = 80;
             if (dist < forceRange) {
                 const force = (forceRange - dist) / forceRange;
                 this.vx += (mdx / dist) * force * 4;
@@ -146,9 +144,16 @@ class ParticleSystem {
         this.rotationX = 0;
         this.rotationY = 0;
         this.transitionProgress = 0;
+        this.analysisCanvas = null;
+        this.analysisCtx = null;
+
+        // Initialize everything
         this.resize();
         this.init();
+        this.setupListeners();
+    }
 
+    setupListeners() {
         window.addEventListener('resize', () => this.resize());
         window.addEventListener('mousemove', (e) => {
             this.mouse.x = e.clientX - this.centerX;
@@ -167,6 +172,18 @@ class ParticleSystem {
         hiddenCanvas.height = window.innerHeight;
         this.centerX = canvas.width / 2;
         this.centerY = canvas.height / 2;
+        this.updateAnalysisResolution();
+    }
+
+    updateAnalysisResolution() {
+        if (!this.analysisCanvas) {
+            this.analysisCanvas = document.createElement('canvas');
+            this.analysisCtx = this.analysisCanvas.getContext('2d', { willReadFrequently: true });
+        }
+        const scale = 0.2;
+        // Ensure strictly integer dimensions
+        this.analysisCanvas.width = Math.floor(window.innerWidth * scale);
+        this.analysisCanvas.height = Math.floor(window.innerHeight * scale);
     }
 
     init() {
@@ -174,6 +191,7 @@ class ParticleSystem {
         this.ambientParticles = [];
         this.coreParticles = [];
 
+        // Create Particles
         for (let i = 0; i < this.numParticles; i++) {
             const phi = Math.acos(-1 + (2 * i) / this.numParticles);
             const theta = Math.sqrt(this.numParticles * Math.PI) * phi;
@@ -202,17 +220,13 @@ class ParticleSystem {
         }
     }
 
-    setStage(stage, text = '') {
+    setStage(stage, text = '', forceLive = false) {
         console.log(`System: Setting Stage to ${stage.toUpperCase()}`);
         this.currentStage = stage;
-        const chat = document.getElementById('chatWrapper');
 
         if (stage !== 'text') {
             this.lastText = null;
-            if (chat) chat.classList.remove('hidden');
             this.particles = [...this.coreParticles, ...this.ambientParticles];
-        } else {
-            if (chat) chat.classList.add('hidden');
         }
 
         if (stage === 'sphere') {
@@ -230,10 +244,12 @@ class ParticleSystem {
                 p.targetZ = p.sphereZ;
                 p.color = p.initialColor;
             });
-        } else if (stage === 'text' && text) {
+        } else if (stage === 'text') {
             this.lastText = null;
-            const isLive = text.endsWith('...');
-            this.morphToText(text, isLive);
+            if (text) {
+                const isLive = forceLive || text.endsWith('...');
+                this.morphToText(text, isLive);
+            }
         } else if (stage === 'idle') {
             this.coreParticles.forEach(p => {
                 p.targetX = (Math.random() - 0.5) * canvas.width;
@@ -251,13 +267,14 @@ class ParticleSystem {
             this.textSequenceInterval = null;
         }
         if (isLive) {
-            this.renderMorph(text);
+            this.renderMorph(text, true);
         } else {
             this.sequenceText(text);
         }
     }
 
     sequenceText(text) {
+        // Use hiddenCanvas for correct font metrics (Full Resolution)
         hCtx.font = `bold ${Math.floor(canvas.width / 12)}px Outfit, Arial, sans-serif`;
         const words = text.split(' ');
         const chunks = [];
@@ -304,20 +321,42 @@ class ParticleSystem {
         }
     }
 
-    renderMorph(text) {
+    renderMorph(text, isLive = false) {
         if (!text) return;
+
+        // HIGH PERFORMANCE THROTTLING (40ms) - Near Instant
+        // Prevents browser choke while feeling instant to user.
+        const throttleLimit = 40;
+        const now = Date.now();
+
+        if (isLive && this.lastRenderTime && (now - this.lastRenderTime < throttleLimit)) {
+            if (this.pendingRender) clearTimeout(this.pendingRender);
+            this.pendingRender = setTimeout(() => {
+                this.renderMorph(text, isLive);
+            }, throttleLimit);
+            return;
+        }
+
+        if (this.pendingRender) clearTimeout(this.pendingRender);
+        this.lastRenderTime = now;
         this.lastText = text;
 
-        hCtx.clearRect(0, 0, hiddenCanvas.width, hiddenCanvas.height);
-        hCtx.fillStyle = 'white';
-        hCtx.textAlign = 'center';
-        hCtx.textBaseline = 'middle';
+        if (!this.analysisCanvas) this.updateAnalysisResolution();
 
-        let fontSize = Math.floor(canvas.width / 12);
-        if (fontSize > 180) fontSize = 180;
-        if (fontSize < 30) fontSize = 30;
+        const analysisW = this.analysisCanvas.width;
+        const analysisH = this.analysisCanvas.height;
+        const analysisScale = 0.2;
 
-        hCtx.font = `bold ${fontSize}px Outfit, Arial, sans-serif`;
+        const aCtx = this.analysisCtx;
+
+        aCtx.clearRect(0, 0, analysisW, analysisH);
+        aCtx.fillStyle = 'white';
+        aCtx.textAlign = 'center';
+        aCtx.textBaseline = 'middle';
+
+        let fontSize = Math.floor(analysisW / 12);
+        if (fontSize < 10) fontSize = 10;
+        aCtx.font = `bold ${fontSize}px Outfit, Arial, sans-serif`;
 
         const words = text.split(' ');
         const lines = [];
@@ -325,8 +364,8 @@ class ParticleSystem {
 
         for (let i = 1; i < words.length; i++) {
             const word = words[i];
-            const width = hCtx.measureText(currentLine + " " + word).width;
-            if (width < canvas.width * 0.95) {
+            const width = aCtx.measureText(currentLine + " " + word).width;
+            if (width < analysisW * 0.95) {
                 currentLine += " " + word;
             } else {
                 lines.push(currentLine);
@@ -337,27 +376,33 @@ class ParticleSystem {
 
         const lineHeight = fontSize * 1.2;
         const totalHeight = lines.length * lineHeight;
-        let startY = this.centerY - (totalHeight / 2) + (lineHeight / 2);
+        const centerY = analysisH / 2;
+        const centerX = analysisW / 2;
+        let startY = centerY - (totalHeight / 2) + (lineHeight / 2);
 
         lines.forEach((line, i) => {
-            hCtx.fillText(line, this.centerX, startY + (i * lineHeight));
+            aCtx.fillText(line, centerX, startY + (i * lineHeight));
         });
 
-        const imageData = hCtx.getImageData(0, 0, hiddenCanvas.width, hiddenCanvas.height).data;
+        const imageData = aCtx.getImageData(0, 0, analysisW, analysisH).data;
         const textPixels = [];
         const step = 1;
 
-        for (let y = 0; y < hiddenCanvas.height; y += step) {
-            for (let x = 0; x < hiddenCanvas.width; x += step) {
-                const index = (y * hiddenCanvas.width + x) * 4;
+        for (let y = 0; y < analysisH; y += step) {
+            for (let x = 0; x < analysisW; x += step) {
+                const index = (y * analysisW + x) * 4;
                 if (imageData[index + 3] > 10) {
-                    textPixels.push({ x: x - this.centerX, y: y - this.centerY });
+                    textPixels.push({
+                        relX: (x - centerX) / analysisScale,
+                        relY: (y - centerY) / analysisScale
+                    });
                 }
             }
         }
 
         if (textPixels.length === 0) return;
 
+        // Shuffle
         for (let i = textPixels.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [textPixels[i], textPixels[j]] = [textPixels[j], textPixels[i]];
@@ -373,10 +418,14 @@ class ParticleSystem {
             if (i < textTargetCount) {
                 const pixelIndex = Math.floor((i * pixelStep) % textPixels.length);
                 const px = textPixels[pixelIndex];
-                p.targetX = px.x + (Math.random() - 0.5) * 4;
-                p.targetY = px.y + (Math.random() - 0.5) * 4;
+
+                p.targetX = px.relX + (Math.random() - 0.5) * 4;
+                p.targetY = px.relY + (Math.random() - 0.5) * 4;
                 p.targetZ = 250 + (Math.random() - 0.5) * 20;
-                p.ease = 0.12 + Math.random() * 0.05;
+
+                // SUPER FAST EASE (0.50)
+                const baseEase = isLive ? 0.50 : 0.12;
+                p.ease = baseEase + Math.random() * 0.05;
             } else {
                 const angle1 = Math.random() * Math.PI * 2;
                 const angle2 = Math.random() * Math.PI * 2;
@@ -400,13 +449,41 @@ class ParticleSystem {
                 const parent = this.coreParticles[i % numCore];
                 const tp = new Particle(parent.x, parent.y, parent.z, false);
                 tp.isTemporary = true;
-                tp.targetX = px.x + (Math.random() - 0.5) * 3;
-                tp.targetY = px.y + (Math.random() - 0.5) * 3;
+                tp.targetX = px.relX + (Math.random() - 0.5) * 3;
+                tp.targetY = px.relY + (Math.random() - 0.5) * 3;
                 tp.targetZ = 250;
-                tp.ease = 0.08 + Math.random() * 0.05;
+                const baseEase = isLive ? 0.35 : 0.08;
+                tp.ease = baseEase + Math.random() * 0.05;
                 tp.opacity = Math.random() * 0.3 + 0.2;
                 this.particles.push(tp);
             }
+        }
+    }
+
+    update() {
+        if (this.currentStage === 'sphere') {
+            this.rotationX += 0.002;
+            this.rotationY += 0.003;
+            // Easing transitions logic
+            if (this.transitionProgress > 0.01) this.transitionProgress *= 0.95;
+            else this.transitionProgress = 0;
+
+            this.coreParticles.forEach(p => {
+                const cosX = Math.cos(this.rotationX);
+                const sinX = Math.sin(this.rotationX);
+                const cosY = Math.cos(this.rotationY);
+                const sinY = Math.sin(this.rotationY);
+
+                // Rotate around absolute sphere coordinates
+                const y1 = p.sphereY * cosX - p.sphereZ * sinX;
+                const z1 = p.sphereY * sinX + p.sphereZ * cosX;
+                const x2 = p.sphereX * cosY - z1 * sinY;
+                const z2 = p.sphereX * sinY + z1 * cosY;
+
+                p.targetX = x2;
+                p.targetY = y1;
+                p.targetZ = z2;
+            });
         }
     }
 
